@@ -1,0 +1,50 @@
+export type AuditIssue = { severity: "Critical" | "High" | "Medium" | "Low"; title: string; why: string; fix: string };
+
+const count = (html: string, pattern: RegExp) => (html.match(pattern) || []).length;
+const has = (html: string, pattern: RegExp) => pattern.test(html);
+const text = (html: string) => html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/gi, " ").replace(/&\w+;/g, " ").replace(/\s+/g, " ").trim();
+const meta = (html: string, name: string) => html.match(new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']*)`, "i"))?.[1] || html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:name|property)=["']${name}["']`, "i"))?.[1] || "";
+
+export function analyzeHtml(html: string, url: string, finalUrl: string, status: number, responseMs: number, headers: Headers) {
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1].trim() || "";
+  const description = meta(html, "description");
+  const h1 = count(html, /<h1\b/gi), images = count(html, /<img\b/gi), links = count(html, /<a\b/gi);
+  const missingAlt = count(html, /<img\b(?![^>]*\balt=)[^>]*>/gi);
+  const words = text(html).split(/\s+/).filter(Boolean).length;
+  const https = finalUrl.startsWith("https://");
+  const viewport = !!meta(html, "viewport");
+  const canonical = has(html, /<link[^>]+rel=["']canonical["']/i);
+  const schema = has(html, /application\/ld\+json|schema\.org/i);
+  const issues: AuditIssue[] = [];
+  const add = (severity: AuditIssue["severity"], title: string, why: string, fix: string) => issues.push({ severity, title, why, fix });
+  if (!https) add("Critical", "HTTPS is not enforced", "Visitors and browsers cannot trust an unencrypted connection.", "Install a valid certificate and redirect all HTTP traffic to HTTPS.");
+  if (responseMs > 2000) add("High", "Slow initial response", "Visitors may leave before the page becomes useful.", "Enable edge caching and investigate server-side work.");
+  if (!title) add("High", "Page title is missing", "Search engines and browser tabs lack a clear page identity.", "Add a unique, descriptive title under 60 characters.");
+  else if (title.length < 20 || title.length > 60) add("Medium", "Page title length needs attention", "A very short or long title may perform poorly in search results.", "Keep the title between 20 and 60 useful characters.");
+  if (!description) add("High", "Meta description is missing", "Search results have no controlled sales message.", "Add a unique 140–160 character description.");
+  if (!h1) add("High", "No H1 heading found", "The page lacks a clear primary topic.", "Add one descriptive H1 near the start of the main content.");
+  if (h1 > 1) add("Medium", "Multiple H1 headings found", "The document hierarchy may be unclear.", "Keep one primary H1 and move subsections to H2.");
+  if (missingAlt) add("Medium", `${missingAlt} image${missingAlt === 1 ? "" : "s"} lack alt text`, "Screen readers and image search lose useful context.", "Add concise alt text to meaningful images and empty alt text to decorative ones.");
+  if (!viewport) add("High", "Mobile viewport is missing", "The page may render poorly on phones.", "Add a responsive viewport meta tag.");
+  if (!canonical) add("Low", "Canonical URL is missing", "Duplicate versions of the page may compete in search.", "Add a self-referencing canonical link.");
+  if (!headers.get("content-security-policy")) add("Medium", "Content Security Policy is missing", "Injected content has fewer browser-level restrictions.", "Add and test a restrictive Content-Security-Policy header.");
+  if (!headers.get("strict-transport-security") && https) add("Low", "HSTS is missing", "Browsers are not instructed to always use HTTPS.", "Add Strict-Transport-Security after confirming HTTPS coverage.");
+  const techPatterns: Record<string, RegExp> = { WordPress: /wp-content|wp-includes/i, Elementor: /elementor/i, WooCommerce: /woocommerce/i, Shopify: /cdn\.shopify|shopify\.theme/i, Wix: /wixstatic|wix\.com/i, Squarespace: /squarespace/i, React: /react(?:dom)?|__react/i, "Next.js": /__NEXT_DATA__|_next\//i, Vue: /data-v-|__vue/i, Nuxt: /__NUXT__|_nuxt\//i, Angular: /ng-version|ng-app/i, Astro: /astro-island/i, Bootstrap: /bootstrap/i, Tailwind: /tailwind/i, jQuery: /jquery/i, Cloudflare: /cloudflare/i, "Google Analytics": /googletagmanager\.com\/gtag|google-analytics\.com/i, "Google Tag Manager": /googletagmanager\.com\/gtm/i, "Meta Pixel": /connect\.facebook\.net.*fbevents/i, Hotjar: /hotjar/i, "Microsoft Clarity": /clarity\.ms/i, "Schema.org": /schema\.org|application\/ld\+json/i };
+  const tech = Object.entries(techPatterns).filter(([, pattern]) => has(html, pattern)).map(([name]) => name);
+  const featurePatterns: Record<string, RegExp> = { "Contact form": /<form[\s\S]{0,2000}(?:email|message|contact)/i, WhatsApp: /wa\.me|whatsapp/i, Booking: /calendly|book(?:ing| now)|appointment/i, Testimonials: /testimonial|reviews?/i, FAQ: /faq|frequently asked/i, Blog: /\/blog|<article/i, Pricing: /pricing|price|plans/i, Newsletter: /newsletter|subscribe/i };
+  const features = Object.fromEntries(Object.entries(featurePatterns).map(([name, pattern]) => [name, has(html, pattern)]));
+  const socialPatterns: Record<string, RegExp> = { Facebook: /facebook\.com/i, Instagram: /instagram\.com/i, LinkedIn: /linkedin\.com/i, TikTok: /tiktok\.com/i, YouTube: /youtube\.com|youtu\.be/i, Pinterest: /pinterest\.com/i, X: /(?:twitter|x)\.com/i, Threads: /threads\.net/i, Discord: /discord\.(?:gg|com)/i, Telegram: /t\.me|telegram\.me/i };
+  const social = Object.entries(socialPatterns).filter(([, pattern]) => has(html, pattern)).map(([name]) => name);
+  const seo = Math.max(0, 100 - (!title ? 25 : 0) - (!description ? 20 : 0) - (!h1 ? 20 : h1 > 1 ? 8 : 0) - Math.min(20, missingAlt * 3) - (!canonical ? 8 : 0) - (!schema ? 7 : 0));
+  const security = Math.max(0, 100 - (!https ? 55 : 0) - (!headers.get("content-security-policy") ? 18 : 0) - (!headers.get("strict-transport-security") ? 12 : 0) - (!headers.get("x-frame-options") ? 8 : 0) - (!headers.get("referrer-policy") ? 7 : 0));
+  const performance = Math.max(10, Math.round(100 - Math.max(0, responseMs - 400) / 28 - Math.max(0, html.length - 200_000) / 10_000));
+  const accessibility = Math.max(0, 100 - Math.min(45, missingAlt * 6) - (!h1 ? 20 : 0) - (count(html, /<input\b(?![^>]*(?:aria-label|id=))[^>]*>/gi) * 5));
+  const content = Math.max(20, Math.min(100, 45 + Math.round(Math.min(words, 900) / 18) - (!h1 ? 15 : 0)));
+  const business = Math.round(Object.values(features).filter(Boolean).length / Object.keys(features).length * 100);
+  const mobile = viewport ? 88 : 35;
+  const scores = { Performance: performance, SEO: seo, Accessibility: accessibility, Security: security, Content: content, Business: business, Mobile: mobile };
+  const score = Math.round(performance*.2 + seo*.2 + accessibility*.15 + security*.15 + content*.1 + business*.1 + mobile*.1);
+  const top = issues.slice(0, 3).map(i => i.title.toLowerCase()).join(", ");
+  const summary = `${score >= 75 ? "The site has a solid foundation" : score >= 55 ? "The site is functional but has clear commercial upside" : "The site presents a strong redesign opportunity"}. The most visible gaps are ${top || "limited"}. A focused project should prioritize the highest-severity technical findings and make the lead journey easier to complete. Sales potential: ${score < 55 ? "High" : score < 78 ? "Medium" : "Low"}.`;
+  return { url, finalUrl, analyzedAt: new Date().toISOString(), score, responseMs, status, scores, tech: tech.length ? tech : ["No signature detected"], features, social, metrics: { Title: title || "Missing", Words: words, Images: images, Links: links, H1: h1, "Meta description": description || "Missing", TTFB: `${(responseMs/1000).toFixed(2)}s`, HTTPS: https ? "Yes" : "No" }, issues, summary };
+}
