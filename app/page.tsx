@@ -11,7 +11,7 @@ type Report = {
 };
 
 const demo: Report = {
-  url: "https://northstar.studio", finalUrl: "https://northstar.studio/", analyzedAt: new Date().toISOString(),
+  url: "https://northstar.studio", finalUrl: "https://northstar.studio/", analyzedAt: "2026-07-16T12:00:00.000Z",
   score: 68, responseMs: 1840, status: 200,
   scores: { Performance: 52, SEO: 74, Accessibility: 63, Security: 82, Content: 71, Business: 60, Mobile: 76 },
   tech: ["WordPress", "Elementor", "Cloudflare", "Google Analytics"],
@@ -88,7 +88,7 @@ export default function Home() {
         </form>
       </section>
 
-      <section className="reportHead" id="report"><div><p className="eyebrow">Latest analysis</p><h2>{domain}</h2><p>Scanned {new Date(report.analyzedAt).toLocaleString()} · HTTP {report.status} · {report.responseMs}ms response</p></div><div className="actions"><button onClick={() => window.print()}>Print / PDF</button><button onClick={() => save("csv")}>CSV</button><button onClick={() => save("json")}>JSON</button></div></section>
+      <section className="reportHead" id="report"><div><p className="eyebrow">Latest analysis</p><h2>{domain}</h2><p>Scanned {report.analyzedAt.slice(0, 16).replace("T", " ")} UTC · HTTP {report.status} · {report.responseMs}ms response</p></div><div className="actions"><button onClick={() => window.print()}>Print / PDF</button><button onClick={() => save("csv")}>CSV</button><button onClick={() => save("json")}>JSON</button></div></section>
 
       <section className="scoreGrid">
         <article className="overall"><div className="ring" style={{"--score": `${report.score * 3.6}deg`} as React.CSSProperties}><div><strong>{report.score}</strong><span>/100</span></div></div><div><p className="eyebrow">Overall website score</p><h3>{report.score >= 80 ? "Strong foundation" : report.score >= 60 ? "Good bones, clear upside" : "Redesign opportunity"}</h3><p>{report.issues.filter(i => i.severity === "High" || i.severity === "Critical").length} priority issues are holding back visibility, trust, or conversion.</p></div></article>
