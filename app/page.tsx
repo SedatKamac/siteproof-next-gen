@@ -3,10 +3,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Issue = { severity: "Critical" | "High" | "Medium" | "Low"; title: string; why: string; fix: string };
+type AiSummary = { executiveSummary: string; strengths: string[]; weaknesses: string[]; recommendations: string[]; salesPotential: "Düşük" | "Orta" | "Yüksek"; redesignReason: string; salesPitch: string; provider: string };
 type Report = {
   url: string; finalUrl: string; analyzedAt: string; score: number; responseMs: number; status: number;
   scores: Record<string, number>; tech: string[]; features: Record<string, boolean>; social: string[];
-  metrics: Record<string, string | number>; issues: Issue[]; summary: string;
+  metrics: Record<string, string | number>; issues: Issue[]; summary: string; aiSummary?: AiSummary;
 };
 
 const demo: Report = {
@@ -37,6 +38,8 @@ export default function Home() {
   const [theme, setTheme] = useState("dark");
   const [tab, setTab] = useState("Overview");
   const [history, setHistory] = useState<Report[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   useEffect(() => {
     setHistory(JSON.parse(localStorage.getItem("siteproof-history") || "[]"));
@@ -49,7 +52,11 @@ export default function Home() {
       const response = await fetch("/api/audit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) });
       const data = await response.json() as Report & { error?: string };
       if (!response.ok) throw new Error(data.error || "The audit could not be completed.");
-      setReport(data); setTab("Overview");
+      setReport(data); setTab("Overview"); setAiLoading(true); setAiError("");
+      const aiResponse = await fetch("/api/summary", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+      if (aiResponse.ok) { data.aiSummary = await aiResponse.json() as AiSummary; setReport({ ...data }); }
+      else { const failure = await aiResponse.json() as { error?: string }; setAiError(failure.error || "Yapay zekâ yorumu oluşturulamadı."); }
+      setAiLoading(false);
       const next = [data, ...history.filter((item) => item.finalUrl !== data.finalUrl)].slice(0, 8);
       setHistory(next); localStorage.setItem("siteproof-history", JSON.stringify(next));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Something went wrong."); }
@@ -97,7 +104,7 @@ export default function Home() {
 
       {tab === "Issues" && <IssueList issues={sortedIssues}/>} 
       {tab === "Signals" && <section className="panelGrid"><article className="panel"><p className="eyebrow">Technology stack</p><h3>Detected technologies</h3><div className="chips">{report.tech.map(t => <span key={t}>{t}</span>)}</div></article><article className="panel"><p className="eyebrow">Social presence</p><h3>Connected channels</h3><div className="chips">{report.social.length ? report.social.map(t => <span key={t}>{t}</span>) : <p>No social profiles detected.</p>}</div></article></section>}
-      {tab === "Summary" && <section className="summary"><div><span>AI-ready summary</span><small>Structured findings only</small></div><p>{report.summary}</p><button onClick={() => navigator.clipboard.writeText(report.summary)}>Copy sales brief</button></section>}
+      {tab === "Summary" && <section className="aiReport"><div className="aiHeading"><div><p className="eyebrow">Yapay zekâ yorumu</p><h3>Teknik veriden iş değerlendirmesi</h3></div><span>{report.aiSummary?.provider || "Gemini 2.5 Flash‑Lite"}</span></div>{aiLoading ? <p className="aiState">Yapay zekâ teknik bulguları yorumluyor…</p> : report.aiSummary ? <><p className="executive">{report.aiSummary.executiveSummary}</p><div className="aiColumns"><div><h4>İyi yönler</h4>{report.aiSummary.strengths.map(item => <p key={item}>✓ {item}</p>)}</div><div><h4>Geliştirilmesi gerekenler</h4>{report.aiSummary.weaknesses.map(item => <p key={item}>– {item}</p>)}</div></div><div className="recommendations"><h4>Nasıl düzeltilmeli?</h4>{report.aiSummary.recommendations.map((item, index) => <div key={item}><b>{index + 1}</b><p>{item}</p></div>)}</div><div className="salesBox"><div><span>Satış potansiyeli</span><strong>{report.aiSummary.salesPotential}</strong></div><p>{report.aiSummary.redesignReason}</p></div><div className="pitch"><span>Ajans satış metni</span><p>{report.aiSummary.salesPitch}</p><button onClick={() => navigator.clipboard.writeText(report.aiSummary!.salesPitch)}>Satış metnini kopyala</button></div></> : <div className="aiState"><p>{aiError || "Yeni bir analiz başlattığınızda gerçek AI yorumu burada oluşacak."}</p><small>Teknik özet: {report.summary}</small></div>}</section>}
 
       <section id="issues" className="priority"><div><p className="eyebrow">Priority fixes</p><h2>The clearest route to a better site</h2></div><IssueList issues={sortedIssues.slice(0, 3)}/></section>
 
